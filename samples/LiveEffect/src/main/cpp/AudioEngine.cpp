@@ -17,41 +17,41 @@
 #include <cassert>
 #include <logging_macros.h>
 
-#include "LiveEffectEngine.h"
+#include "AudioEngine.h"
 
-LiveEffectEngine::LiveEffectEngine() {
+AudioEngine::AudioEngine() {
     assert(mOutputChannelCount == mInputChannelCount);
 }
 
-void LiveEffectEngine::setRecordingDeviceId(int32_t deviceId) {
+void AudioEngine::setRecordingDeviceId(int32_t deviceId) {
     mRecordingDeviceId = deviceId;
 }
 
-void LiveEffectEngine::setPlaybackDeviceId(int32_t deviceId) {
+void AudioEngine::setPlaybackDeviceId(int32_t deviceId) {
     mPlaybackDeviceId = deviceId;
 }
 
-bool LiveEffectEngine::isAAudioRecommended() {
+bool AudioEngine::isAAudioRecommended() {
     return oboe::AudioStreamBuilder::isAAudioRecommended();
 }
 
-bool LiveEffectEngine::setAudioApi(oboe::AudioApi api) {
+bool AudioEngine::setAudioApi(oboe::AudioApi api) {
     if (mIsEffectOn) return false;
     mAudioApi = api;
     return true;
 }
 
-bool LiveEffectEngine::setEffectOn(bool isOn) {
+bool AudioEngine::setEffectOn(bool isOn) {
     bool success = true;
     if (isOn != mIsEffectOn) {
         if (isOn) {
             success = openStreams() == oboe::Result::OK;
             if (success) {
-                mFullDuplexPass.start();
+                mRecordStreamCallBack.start();
                 mIsEffectOn = isOn;
             }
         } else {
-            mFullDuplexPass.stop();
+            mRecordStreamCallBack.stop();
             closeStreams();
             mIsEffectOn = isOn;
        }
@@ -59,7 +59,7 @@ bool LiveEffectEngine::setEffectOn(bool isOn) {
     return success;
 }
 
-void LiveEffectEngine::closeStreams() {
+void AudioEngine::closeStreams() {
     /*
     * Note: The order of events is important here.
     * The playback stream must be closed before the recording stream. If the
@@ -69,42 +69,52 @@ void LiveEffectEngine::closeStreams() {
     * null.
     */
     closeStream(mPlayStream);
-    mFullDuplexPass.setOutputStream(nullptr);
+    mRecordStreamCallBack.setOutputStream(nullptr);
 
     closeStream(mRecordingStream);
-    mFullDuplexPass.setInputStream(nullptr);
+    mRecordStreamCallBack.setInputStream(nullptr);
 }
 
-oboe::Result  LiveEffectEngine::openStreams() {
-    // Note: The order of stream creation is important. We create the playback
-    // stream first, then use properties from the playback stream
-    // (e.g. sample rate) to create the recording stream. By matching the
+oboe::Result  AudioEngine::openStreams() {
+    // Note: The order of stream creation is important. We create the recording
+    // stream first, then use properties from the recording stream
+    // (e.g. sample rate) to create the playback stream. By matching the
     // properties we should get the lowest latency path
-
+    int32_t sampleRate = 16000;
+    int32_t peroidLenInMilliSeconds = 20;
+    int32_t bufferSize = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
     oboe::AudioStreamBuilder inBuilder, outBuilder;
-    setupPlaybackStreamParameters(&outBuilder);
-    oboe::Result result = outBuilder.openStream(mPlayStream);
+    setupRecordingStreamParameters(&inBuilder, sampleRate, peroidLenInMilliSeconds);
+    oboe::Result result = inBuilder.openStream(mRecordingStream);
     if (result != oboe::Result::OK) {
-        LOGE("Failed to open output stream. Error %s", oboe::convertToText(result));
+        LOGE("Failed to open input stream. Error %s", oboe::convertToText(result));
         mSampleRate = oboe::kUnspecified;
         return result;
     } else {
         // The input stream needs to run at the same sample rate as the output.
-        mSampleRate = mPlayStream->getSampleRate();
+        mSampleRate = mRecordingStream->getSampleRate();
+        assert(mSampleRate == sampleRate);
     }
-    warnIfNotLowLatency(mPlayStream);
-
-    setupRecordingStreamParameters(&inBuilder, mSampleRate);
-    result = inBuilder.openStream(mRecordingStream);
-    if (result != oboe::Result::OK) {
-        LOGE("Failed to open input stream. Error %s", oboe::convertToText(result));
-        closeStream(mPlayStream);
-        return result;
-    }
+    mRecordingStream->setBufferSizeInFrames(bufferSize);
+    int32_t recordBufferSize = mRecordingStream->getBufferSizeInFrames();
+    assert(recordBufferSize>0);
     warnIfNotLowLatency(mRecordingStream);
 
-    mFullDuplexPass.setInputStream(mRecordingStream);
-    mFullDuplexPass.setOutputStream(mPlayStream);
+
+    setupPlaybackStreamParameters(&outBuilder);
+    result = outBuilder.openStream(mPlayStream);
+    if (result != oboe::Result::OK) {
+        LOGE("Failed to open output stream. Error %s", oboe::convertToText(result));
+        closeStream(mRecordingStream);
+        return result;
+    }
+    mPlayStream->setBufferSizeInFrames(bufferSize);
+    int32_t playBufferSize = mPlayStream->getBufferSizeInFrames();
+    assert(playBufferSize>0);
+    warnIfNotLowLatency(mPlayStream);
+
+    mRecordStreamCallBack.setInputStream(mRecordingStream);
+    mRecordStreamCallBack.setOutputStream(mPlayStream);
     return result;
 }
 
@@ -116,13 +126,19 @@ oboe::Result  LiveEffectEngine::openStreams() {
  * @param builder The recording stream builder
  * @param sampleRate The desired sample rate of the recording stream
  */
-oboe::AudioStreamBuilder *LiveEffectEngine::setupRecordingStreamParameters(
-    oboe::AudioStreamBuilder *builder, int32_t sampleRate) {
+oboe::AudioStreamBuilder *AudioEngine::setupRecordingStreamParameters(
+    oboe::AudioStreamBuilder *builder, int32_t sampleRate, int32_t peroidLenInMilliSeconds) {
     // This sample uses blocking read() because we don't specify a callback
-    builder->setDeviceId(mRecordingDeviceId)
-        ->setDirection(oboe::Direction::Input)
-        ->setSampleRate(sampleRate)
-        ->setChannelCount(mInputChannelCount);
+    // 16kHz * 20Ms  = 320 frames //  * 1 channel = 320 samples // * 2 Bytes = 640 Bytes
+    int32_t framesPerCallback = sampleRate * peroidLenInMilliSeconds/1000;
+    assert(framesPerCallback == 320);
+    builder->setDataCallback(this)
+            ->setErrorCallback(this)
+            ->setDeviceId(mRecordingDeviceId)
+            ->setDirection(oboe::Direction::Input)
+            ->setSampleRate(sampleRate)
+            ->setChannelCount(mInputChannelCount)
+            ->setFramesPerDataCallback(framesPerCallback);
     return setupCommonStreamParameters(builder);
 }
 
@@ -132,13 +148,12 @@ oboe::AudioStreamBuilder *LiveEffectEngine::setupRecordingStreamParameters(
  * playback.
  * @param builder The playback stream builder
  */
-oboe::AudioStreamBuilder *LiveEffectEngine::setupPlaybackStreamParameters(
+oboe::AudioStreamBuilder *AudioEngine::setupPlaybackStreamParameters(
     oboe::AudioStreamBuilder *builder) {
-    builder->setDataCallback(this)
-        ->setErrorCallback(this)
-        ->setDeviceId(mPlaybackDeviceId)
-        ->setDirection(oboe::Direction::Output)
-        ->setChannelCount(mOutputChannelCount);
+    builder->setDeviceId(mPlaybackDeviceId)
+            ->setDirection(oboe::Direction::Output)
+            ->setSampleRate(mSampleRate)
+            ->setChannelCount(mOutputChannelCount);
 
     return setupCommonStreamParameters(builder);
 }
@@ -150,17 +165,15 @@ oboe::AudioStreamBuilder *LiveEffectEngine::setupPlaybackStreamParameters(
  * streams.
  * @param builder The playback or recording stream builder
  */
-oboe::AudioStreamBuilder *LiveEffectEngine::setupCommonStreamParameters(
+oboe::AudioStreamBuilder *AudioEngine::setupCommonStreamParameters(
     oboe::AudioStreamBuilder *builder) {
-    // We request EXCLUSIVE mode since this will give us the lowest possible
-    // latency.
-    // If EXCLUSIVE mode isn't available the builder will fall back to SHARED
-    // mode.
     builder->setAudioApi(mAudioApi)
-        ->setFormat(mFormat)
-        ->setFormatConversionAllowed(true)
-        ->setSharingMode(oboe::SharingMode::Exclusive)
-        ->setPerformanceMode(oboe::PerformanceMode::LowLatency);
+            ->setFormat(mFormat)
+            ->setFormatConversionAllowed(true)
+            ->setChannelConversionAllowed(true)
+            ->setSharingMode(oboe::SharingMode::Shared)
+            ->setPerformanceMode(oboe::PerformanceMode::LowLatency);
+
     return builder;
 }
 
@@ -171,7 +184,7 @@ oboe::AudioStreamBuilder *LiveEffectEngine::setupCommonStreamParameters(
  * [the closing thread is the UI thread in this sample].
  * @param stream the stream to close
  */
-void LiveEffectEngine::closeStream(std::shared_ptr<oboe::AudioStream> &stream) {
+void AudioEngine::closeStream(std::shared_ptr<oboe::AudioStream> &stream) {
     if (stream) {
         oboe::Result result = stream->stop();
         if (result != oboe::Result::OK) {
@@ -192,7 +205,7 @@ void LiveEffectEngine::closeStream(std::shared_ptr<oboe::AudioStream> &stream) {
  * @param stream: newly created stream
  *
  */
-void LiveEffectEngine::warnIfNotLowLatency(std::shared_ptr<oboe::AudioStream> &stream) {
+void AudioEngine::warnIfNotLowLatency(std::shared_ptr<oboe::AudioStream> &stream) {
     if (stream->getPerformanceMode() != oboe::PerformanceMode::LowLatency) {
         LOGW(
             "Stream is NOT low latency."
@@ -209,9 +222,9 @@ void LiveEffectEngine::warnIfNotLowLatency(std::shared_ptr<oboe::AudioStream> &s
  * @param numFrames:  number of frames to load to audioData buffer
  * @return: DataCallbackResult::Continue.
  */
-oboe::DataCallbackResult LiveEffectEngine::onAudioReady(
+oboe::DataCallbackResult AudioEngine::onAudioReady(
     oboe::AudioStream *oboeStream, void *audioData, int32_t numFrames) {
-    return mFullDuplexPass.onAudioReady(oboeStream, audioData, numFrames);
+    return mRecordStreamCallBack.onAudioReady(oboeStream, audioData, numFrames);
 }
 
 /**
@@ -220,7 +233,7 @@ oboe::DataCallbackResult LiveEffectEngine::onAudioReady(
  * @param oboeStream: the stream to close
  * @param error: oboe's reason for closing the stream
  */
-void LiveEffectEngine::onErrorBeforeClose(oboe::AudioStream *oboeStream,
+void AudioEngine::onErrorBeforeClose(oboe::AudioStream *oboeStream,
                                           oboe::Result error) {
     LOGE("%s stream Error before close: %s",
          oboe::convertToText(oboeStream->getDirection()),
@@ -233,7 +246,7 @@ void LiveEffectEngine::onErrorBeforeClose(oboe::AudioStream *oboeStream,
  * @param oboeStream
  * @param error
  */
-void LiveEffectEngine::onErrorAfterClose(oboe::AudioStream *oboeStream,
+void AudioEngine::onErrorAfterClose(oboe::AudioStream *oboeStream,
                                          oboe::Result error) {
     LOGE("%s stream Error after close: %s",
          oboe::convertToText(oboeStream->getDirection()),

@@ -16,12 +16,12 @@
 
 #include <jni.h>
 #include <logging_macros.h>
-#include "LiveEffectEngine.h"
+#include "AudioEngine.h"
 
 static const int kOboeApiAAudio = 0;
 static const int kOboeApiOpenSLES = 1;
 
-static LiveEffectEngine *engine = nullptr;
+static AudioEngine *engine = nullptr;
 
 extern "C" {
 
@@ -29,7 +29,7 @@ JNIEXPORT jboolean JNICALL
 Java_com_google_oboe_samples_liveEffect_LiveEffectEngine_create(JNIEnv *env,
                                                                jclass) {
     if (engine == nullptr) {
-        engine = new LiveEffectEngine();
+        engine = new AudioEngine();
     }
 
     return (engine != nullptr) ? JNI_TRUE : JNI_FALSE;
