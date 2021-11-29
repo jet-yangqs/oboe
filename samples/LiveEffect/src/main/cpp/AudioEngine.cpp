@@ -108,6 +108,9 @@ oboe::Result  AudioEngine::openStreams() {
         closeStream(mRecordingStream);
         return result;
     }
+    assert(mSampleRate == 16000);
+    int32_t playSampleRate = mPlayStream->getSampleRate();
+    assert(playSampleRate == mSampleRate);
     mPlayStream->setBufferSizeInFrames(bufferSize);
     int32_t playBufferSize = mPlayStream->getBufferSizeInFrames();
     assert(playBufferSize>0);
@@ -150,6 +153,7 @@ oboe::AudioStreamBuilder *AudioEngine::setupRecordingStreamParameters(
  */
 oboe::AudioStreamBuilder *AudioEngine::setupPlaybackStreamParameters(
     oboe::AudioStreamBuilder *builder) {
+    assert(mSampleRate == 16000);
     builder->setDeviceId(mPlaybackDeviceId)
             ->setDirection(oboe::Direction::Output)
             ->setSampleRate(mSampleRate)
