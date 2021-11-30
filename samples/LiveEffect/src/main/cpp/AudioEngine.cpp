@@ -48,10 +48,12 @@ bool AudioEngine::setEffectOn(bool isOn) {
             success = openStreams() == oboe::Result::OK;
             if (success) {
                 mRecordStreamCallBack.start();
+                mPlayStreamCallBack.start();
                 mIsEffectOn = isOn;
             }
         } else {
             mRecordStreamCallBack.stop();
+            mPlayStreamCallBack.stop();
             closeStreams();
             mIsEffectOn = isOn;
        }
@@ -69,38 +71,83 @@ void AudioEngine::closeStreams() {
     * null.
     */
     closeStream(mPlayStream);
-    mRecordStreamCallBack.setOutputStream(nullptr);
-
+    mPlayStreamCallBack.setOutputStream(nullptr);
+    mPlayStreamCallBack.setAudioEngine(nullptr);
     closeStream(mRecordingStream);
     mRecordStreamCallBack.setInputStream(nullptr);
+    mRecordStreamCallBack.setAudioEngine(nullptr);
+    mBufferSizeInBytes = 0;
+    if(mEngineBuffer){
+        delete mEngineBuffer;
+    }
 }
 
+int AudioEngine::onPlay(oboe::AudioStream *outputStream, void *audioData, int numFrames){
+    const char *engineBuffer = static_cast<const char *>(mEngineBuffer);
+
+    // 16kHz * 20ms * 16pits_per_sample/8 * 1 channel= 640 inByte
+    int32_t bufferSizeInBytes = outputStream->getSampleRate() * mPeroidLenInMilliSeconds/1000 *
+                                 2 * outputStream->getChannelCount();
+    assert(bufferSizeInBytes == 640);
+    assert(numFrames == 320);
+    assert(bufferSizeInBytes <= mBufferSizeInBytes);
+    assert(mEngineBuffer);
+    // copy data from engineBuffer to outputBuffer
+    std::lock_guard<std::mutex> lock(mBufferMutex);
+    std::memcpy(audioData, engineBuffer, bufferSizeInBytes);
+    return numFrames;
+}
+
+int AudioEngine::onRecord(oboe::AudioStream *inputStream, void *audioData, int numFrames){
+
+    // This code assumes the data format for both streams is int16.
+    const char *inputData = static_cast<const char *>(audioData);
+
+    // 16kHz * 20ms * 16pits_per_sample/8 * 1 channel= 640 inByte
+    int32_t bufferSizeInBytes = inputStream->getSampleRate() * mPeroidLenInMilliSeconds/1000 *
+                                 2 * inputStream->getChannelCount();
+    assert(bufferSizeInBytes == 640);
+    assert(numFrames == 320);
+    assert(bufferSizeInBytes <= mBufferSizeInBytes);
+    assert(mEngineBuffer);
+    // copy data from record stream to engineBuffer
+
+    std::lock_guard<std::mutex> lock(mBufferMutex);
+    std::memcpy(mEngineBuffer, inputData, bufferSizeInBytes);
+
+    return numFrames;
+}
+
+
 oboe::Result  AudioEngine::openStreams() {
-    // Note: The order of stream creation is important. We create the recording
-    // stream first, then use properties from the recording stream
-    // (e.g. sample rate) to create the playback stream. By matching the
-    // properties we should get the lowest latency path
+
     int32_t sampleRate = 16000;
     int32_t peroidLenInMilliSeconds = 20;
-    int32_t bufferSize = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
+    setupConfigParameters(sampleRate, peroidLenInMilliSeconds);
+
+    // int32_t bufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
+
+    // config record stream
     oboe::AudioStreamBuilder inBuilder, outBuilder;
-    setupRecordingStreamParameters(&inBuilder, sampleRate, peroidLenInMilliSeconds);
+    setupRecordingStreamParameters(&inBuilder);
     oboe::Result result = inBuilder.openStream(mRecordingStream);
     if (result != oboe::Result::OK) {
         LOGE("Failed to open input stream. Error %s", oboe::convertToText(result));
-        mSampleRate = oboe::kUnspecified;
         return result;
     } else {
-        // The input stream needs to run at the same sample rate as the output.
-        mSampleRate = mRecordingStream->getSampleRate();
-        assert(mSampleRate == sampleRate);
+        int32_t recordBufferCapacityInBytes = mRecordingStream->getBufferCapacityInFrames()
+                                    * mRecordingStream->getChannelCount() * 2;
+        // buffer size need less than buffer capacity
+        assert(mBufferSizeInBytes <= recordBufferCapacityInBytes);
+        mPeroidLenInMilliSeconds = peroidLenInMilliSeconds;
+        mEngineBuffer = new char[mBufferSizeInBytes];
     }
-    mRecordingStream->setBufferSizeInFrames(bufferSize);
-    int32_t recordBufferSize = mRecordingStream->getBufferSizeInFrames();
-    assert(recordBufferSize>0);
+
+    // int32_t recordBufferSize = mRecordingStream->getBufferSizeInFrames();
+    // assert(recordBufferSize>0);
     warnIfNotLowLatency(mRecordingStream);
 
-
+    // config play stream
     setupPlaybackStreamParameters(&outBuilder);
     result = outBuilder.openStream(mPlayStream);
     if (result != oboe::Result::OK) {
@@ -108,17 +155,32 @@ oboe::Result  AudioEngine::openStreams() {
         closeStream(mRecordingStream);
         return result;
     }
-    assert(mSampleRate == 16000);
-    int32_t playSampleRate = mPlayStream->getSampleRate();
-    assert(playSampleRate == mSampleRate);
-    mPlayStream->setBufferSizeInFrames(bufferSize);
-    int32_t playBufferSize = mPlayStream->getBufferSizeInFrames();
-    assert(playBufferSize>0);
+    int32_t playBufferCapacityInBytes = mPlayStream->getBufferCapacityInFrames()
+                                * mPlayStream->getChannelCount() * 2;
+
+    assert(mBufferSizeInBytes <= playBufferCapacityInBytes);
     warnIfNotLowLatency(mPlayStream);
 
     mRecordStreamCallBack.setInputStream(mRecordingStream);
-    mRecordStreamCallBack.setOutputStream(mPlayStream);
+    mRecordStreamCallBack.setAudioEngine(this);
+    mPlayStreamCallBack.setOutputStream(mPlayStream);
+    mPlayStreamCallBack.setAudioEngine(this);
+
+    assert(mSampleRate == 16000);
+    int32_t playSampleRate = mPlayStream->getSampleRate();
+    assert(playSampleRate == mSampleRate);
+    /*
+     * mPlayStream->setBufferSizeInFrames(bufferSize);
+     * int32_t playBufferSize = mPlayStream->getBufferSizeInFrames();
+     * assert(playBufferSize>0);
+    */
     return result;
+}
+
+void AudioEngine::setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds){
+    mSampleRate = sampleRate;
+    mPeroidLenInMilliSeconds = peroidLenInMilliSeconds;
+    mBufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
 }
 
 /**
@@ -130,16 +192,17 @@ oboe::Result  AudioEngine::openStreams() {
  * @param sampleRate The desired sample rate of the recording stream
  */
 oboe::AudioStreamBuilder *AudioEngine::setupRecordingStreamParameters(
-    oboe::AudioStreamBuilder *builder, int32_t sampleRate, int32_t peroidLenInMilliSeconds) {
+    oboe::AudioStreamBuilder *builder) {
     // This sample uses blocking read() because we don't specify a callback
     // 16kHz * 20Ms  = 320 frames //  * 1 channel = 320 samples // * 2 Bytes = 640 Bytes
-    int32_t framesPerCallback = sampleRate * peroidLenInMilliSeconds/1000;
+
+    int32_t framesPerCallback = mSampleRate * mPeroidLenInMilliSeconds/1000;
     assert(framesPerCallback == 320);
-    builder->setDataCallback(this)
-            ->setErrorCallback(this)
+    builder->setDataCallback(&mRecordStreamCallBack)
+            ->setErrorCallback(&mRecordStreamCallBack)
             ->setDeviceId(mRecordingDeviceId)
             ->setDirection(oboe::Direction::Input)
-            ->setSampleRate(sampleRate)
+            ->setSampleRate(mSampleRate)
             ->setChannelCount(mInputChannelCount)
             ->setFramesPerDataCallback(framesPerCallback);
     return setupCommonStreamParameters(builder);
@@ -154,10 +217,14 @@ oboe::AudioStreamBuilder *AudioEngine::setupRecordingStreamParameters(
 oboe::AudioStreamBuilder *AudioEngine::setupPlaybackStreamParameters(
     oboe::AudioStreamBuilder *builder) {
     assert(mSampleRate == 16000);
-    builder->setDeviceId(mPlaybackDeviceId)
+    int32_t framesPerCallback = mSampleRate * mPeroidLenInMilliSeconds/1000;
+    assert(framesPerCallback == 320);
+    builder->setDataCallback(&mPlayStreamCallBack)
+            ->setDeviceId(mPlaybackDeviceId)
             ->setDirection(oboe::Direction::Output)
             ->setSampleRate(mSampleRate)
-            ->setChannelCount(mOutputChannelCount);
+            ->setChannelCount(mOutputChannelCount)
+            ->setFramesPerDataCallback(framesPerCallback);
 
     return setupCommonStreamParameters(builder);
 }
@@ -217,42 +284,4 @@ void AudioEngine::warnIfNotLowLatency(std::shared_ptr<oboe::AudioStream> &stream
     }
 }
 
-/**
- * Handles playback stream's audio request. In this sample, we simply block-read
- * from the record stream for the required samples.
- *
- * @param oboeStream: the playback stream that requesting additional samples
- * @param audioData:  the buffer to load audio samples for playback stream
- * @param numFrames:  number of frames to load to audioData buffer
- * @return: DataCallbackResult::Continue.
- */
-oboe::DataCallbackResult AudioEngine::onAudioReady(
-    oboe::AudioStream *oboeStream, void *audioData, int32_t numFrames) {
-    return mRecordStreamCallBack.onAudioReady(oboeStream, audioData, numFrames);
-}
 
-/**
- * Oboe notifies the application for "about to close the stream".
- *
- * @param oboeStream: the stream to close
- * @param error: oboe's reason for closing the stream
- */
-void AudioEngine::onErrorBeforeClose(oboe::AudioStream *oboeStream,
-                                          oboe::Result error) {
-    LOGE("%s stream Error before close: %s",
-         oboe::convertToText(oboeStream->getDirection()),
-         oboe::convertToText(error));
-}
-
-/**
- * Oboe notifies application that "the stream is closed"
- *
- * @param oboeStream
- * @param error
- */
-void AudioEngine::onErrorAfterClose(oboe::AudioStream *oboeStream,
-                                         oboe::Result error) {
-    LOGE("%s stream Error after close: %s",
-         oboe::convertToText(oboeStream->getDirection()),
-         oboe::convertToText(error));
-}

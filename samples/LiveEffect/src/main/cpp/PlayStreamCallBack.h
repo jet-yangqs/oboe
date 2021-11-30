@@ -2,8 +2,8 @@
 // Created by noelyang on 2021/11/26.
 //
 
-#ifndef SAMPLES_RECORDSTREAMCALLBACK_H
-#define SAMPLES_RECORDSTREAMCALLBACK_H
+#ifndef SAMPLES_PLAYSTREAMCALLBACK_H
+#define SAMPLES_PLAYSTREAMCALLBACK_H
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -13,16 +13,16 @@
 //#include "AudioEngine.h"
 
 class AudioEngine;
-class RecordStreamCallBack : public oboe::AudioStreamCallback {
+class PlayStreamCallBack : public oboe::AudioStreamCallback {
 public:
-    RecordStreamCallBack() {}
-    virtual ~RecordStreamCallBack() {}
+    PlayStreamCallBack() {}
+    virtual ~PlayStreamCallBack() {}
 
-    void setInputStream(std::shared_ptr<oboe::AudioStream> stream) {
-        mInputStream = stream;
+    void setOutputStream(std::shared_ptr<oboe::AudioStream> stream) {
+        mOutputStream = stream;
     }
 
-    void setAudioEngine(AudioEngine * engine) {
+    void setAudioEngine(AudioEngine* engine) {
         mAudioEngine = engine;
     }
 
@@ -31,28 +31,28 @@ public:
     virtual oboe::Result stop();
 
 
-    /**
-     * Called by Oboe when the stream is ready to process audio.
-     * This implements the stream synchronization. App should NOT override this method.
+    /*
+     * oboe::AudioStreamDataCallback interface implementation
      */
-    oboe::DataCallbackResult onAudioReady(oboe::AudioStream *audioStream,
+    oboe::DataCallbackResult onAudioReady( oboe::AudioStream *audioStream,
                                             void *audioData, int numFrames) override;
 
+    /*
+     * oboe::AudioStreamErrorCallback interface implementation
+     */
     void onErrorBeforeClose(oboe::AudioStream *oboeStream, oboe::Result error) override;
     void onErrorAfterClose(oboe::AudioStream *oboeStream, oboe::Result error) override;
 
     int32_t getNumInputBurstsCushion() const;
 
-
 private:
-
 
     // let input fill back up, usually 0 or 1
     int32_t              mNumInputBurstsCushion = 1;
 
-
-    std::shared_ptr<oboe::AudioStream> mInputStream = nullptr;
+    std::shared_ptr<oboe::AudioStream> mOutputStream = nullptr;
     AudioEngine* mAudioEngine = nullptr;
+
 };
 
-#endif //SAMPLES_RECORDSTREAMCALLBACK_H
+#endif //SAMPLES_PLAYSTREAMCALLBACK_H

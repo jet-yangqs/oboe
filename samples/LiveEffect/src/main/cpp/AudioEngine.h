@@ -22,46 +22,44 @@
 #include <string>
 #include <thread>
 #include "RecordStreamCallBack.h"
+#include "PlayStreamCallBack.h"
+#include <mutex>
 
-class AudioEngine : public oboe::AudioStreamCallback {
+class AudioEngine {
 public:
     AudioEngine();
 
     void setRecordingDeviceId(int32_t deviceId);
     void setPlaybackDeviceId(int32_t deviceId);
-
+    int onPlay(oboe::AudioStream *outputStream, void *audioData, int numFrames);
+    int onRecord(oboe::AudioStream *inputStream, void *audioData, int numFrames);
     /**
      * @param isOn
      * @return true if it succeeds
      */
     bool setEffectOn(bool isOn);
-
-    /*
-     * oboe::AudioStreamDataCallback interface implementation
-     */
-    oboe::DataCallbackResult onAudioReady(oboe::AudioStream *oboeStream,
-                                          void *audioData, int32_t numFrames) override;
-
-    /*
-     * oboe::AudioStreamErrorCallback interface implementation
-     */
-    void onErrorBeforeClose(oboe::AudioStream *oboeStream, oboe::Result error) override;
-    void onErrorAfterClose(oboe::AudioStream *oboeStream, oboe::Result error) override;
-
     bool setAudioApi(oboe::AudioApi);
     bool isAAudioRecommended(void);
+    void setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds);
 
 private:
     RecordStreamCallBack    mRecordStreamCallBack;
+    PlayStreamCallBack    mPlayStreamCallBack;
     bool              mIsEffectOn = false;
+    // builder parameters
     int32_t           mRecordingDeviceId = oboe::kUnspecified;
     int32_t           mPlaybackDeviceId = oboe::kUnspecified;
-    //const oboe::AudioFormat mFormat = oboe::AudioFormat::Float; // for easier processing
     const oboe::AudioFormat mFormat = oboe::AudioFormat::I16;
     oboe::AudioApi    mAudioApi = oboe::AudioApi::AAudio;
-    int32_t           mSampleRate = oboe::kUnspecified;
+    int32_t           mSampleRate = 16000;
     const int32_t     mInputChannelCount = oboe::ChannelCount::Mono;
     const int32_t     mOutputChannelCount = oboe::ChannelCount::Mono;
+
+    // buffer info
+    int32_t              mBufferSizeInBytes = 0;
+    int32_t              mPeroidLenInMilliSeconds  = 20;
+    char *               mEngineBuffer = nullptr;
+    std::mutex           mBufferMutex;
 
     std::shared_ptr<oboe::AudioStream> mRecordingStream;
     std::shared_ptr<oboe::AudioStream> mPlayStream;
@@ -75,7 +73,7 @@ private:
     oboe::AudioStreamBuilder *setupCommonStreamParameters(
         oboe::AudioStreamBuilder *builder);
     oboe::AudioStreamBuilder *setupRecordingStreamParameters(
-        oboe::AudioStreamBuilder *builder, int32_t sampleRate, int32_t peroidLenInMilliSeconds);
+        oboe::AudioStreamBuilder *builder);
     oboe::AudioStreamBuilder *setupPlaybackStreamParameters(
         oboe::AudioStreamBuilder *builder);
     void warnIfNotLowLatency(std::shared_ptr<oboe::AudioStream> &stream);
