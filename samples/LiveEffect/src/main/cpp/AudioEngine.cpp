@@ -19,6 +19,8 @@
 
 #include "AudioEngine.h"
 
+extern JavaVM *gs_jvm;
+
 AudioEngine::AudioEngine() {
     assert(mOutputChannelCount == mInputChannelCount);
 }
@@ -83,6 +85,8 @@ void AudioEngine::closeStreams() {
 }
 
 int AudioEngine::onPlay(oboe::AudioStream *outputStream, void *audioData, int numFrames){
+
+
     const char *engineBuffer = static_cast<const char *>(mEngineBuffer);
 
     // 16kHz * 20ms * 16pits_per_sample/8 * 1 channel= 640 inByte
@@ -95,6 +99,7 @@ int AudioEngine::onPlay(oboe::AudioStream *outputStream, void *audioData, int nu
     // copy data from engineBuffer to outputBuffer
     std::lock_guard<std::mutex> lock(mBufferMutex);
     std::memcpy(audioData, engineBuffer, bufferSizeInBytes);
+    mJniCallBack.onPlay((char*)audioData, numFrames);
     return numFrames;
 }
 
@@ -114,7 +119,7 @@ int AudioEngine::onRecord(oboe::AudioStream *inputStream, void *audioData, int n
 
     std::lock_guard<std::mutex> lock(mBufferMutex);
     std::memcpy(mEngineBuffer, inputData, bufferSizeInBytes);
-
+    mJniCallBack.onRecord((char*)audioData, numFrames);
     return numFrames;
 }
 

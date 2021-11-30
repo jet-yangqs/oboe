@@ -23,15 +23,20 @@ static const int kOboeApiOpenSLES = 1;
 
 static AudioEngine *engine = nullptr;
 
+JavaVM *gs_jvm = NULL;
+jobject g_mjobject;
+
 extern "C" {
 
 JNIEXPORT jboolean JNICALL
 Java_com_google_oboe_samples_liveEffect_LiveEffectEngine_create(JNIEnv *env,
-                                                               jclass) {
+                                                               jclass jengine) {
     if (engine == nullptr) {
         engine = new AudioEngine();
     }
 
+    env->GetJavaVM(&gs_jvm);
+    g_mjobject = env->NewGlobalRef(jengine);
     return (engine != nullptr) ? JNI_TRUE : JNI_FALSE;
 }
 

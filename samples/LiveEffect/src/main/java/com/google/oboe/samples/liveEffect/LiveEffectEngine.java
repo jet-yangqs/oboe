@@ -18,14 +18,22 @@ package com.google.oboe.samples.liveEffect;
 import android.content.Context;
 import android.media.AudioManager;
 import android.os.Build;
+import android.util.Log;
 
-public enum LiveEffectEngine {
+public class LiveEffectEngine {
 
-    INSTANCE;
 
     // Load native library
     static {
         System.loadLibrary("liveEffect");
+    }
+
+    void javaOnRecord(){
+        Log.d("java layer: ","javaOnRecord: void func called from record back thread.");
+    }
+
+    static void javaOnPlay(){
+        Log.d("java layer: ", "javaOnPlay: static void func called from play back thread.");
     }
 
     // Native methods
@@ -37,6 +45,7 @@ public enum LiveEffectEngine {
     static native void setPlaybackDeviceId(int deviceId);
     static native void delete();
     static native void native_setDefaultStreamValues(int defaultSampleRate, int defaultFramesPerBurst);
+
 
     static void setDefaultStreamValues(Context context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1){

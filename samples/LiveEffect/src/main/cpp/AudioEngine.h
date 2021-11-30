@@ -23,6 +23,7 @@
 #include <thread>
 #include "RecordStreamCallBack.h"
 #include "PlayStreamCallBack.h"
+#include "JniCallBack.h"
 #include <mutex>
 
 class AudioEngine {
@@ -44,7 +45,8 @@ public:
 
 private:
     RecordStreamCallBack    mRecordStreamCallBack;
-    PlayStreamCallBack    mPlayStreamCallBack;
+    PlayStreamCallBack      mPlayStreamCallBack;
+    JniCallBack             mJniCallBack;
     bool              mIsEffectOn = false;
     // builder parameters
     int32_t           mRecordingDeviceId = oboe::kUnspecified;

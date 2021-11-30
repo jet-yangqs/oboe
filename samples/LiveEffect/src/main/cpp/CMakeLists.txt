@@ -28,6 +28,7 @@ add_library(liveEffect
         AudioEngine.cpp
         RecordStreamCallBack.cpp
         PlayStreamCallBack.cpp
+        JniCallBack.cpp
         jni_bridge.cpp
         ${SAMPLE_ROOT_DIR}/debug-utils/trace.cpp)
 target_include_directories(liveEffect
