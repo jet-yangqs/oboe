@@ -52,14 +52,16 @@ Java_com_google_oboe_samples_liveEffect_LiveEffectEngine_delete(JNIEnv *env,
 
 JNIEXPORT jboolean JNICALL
 Java_com_google_oboe_samples_liveEffect_LiveEffectEngine_setEffectOn(
-    JNIEnv *env, jclass, jboolean isEffectOn) {
+    JNIEnv *env, jclass, jboolean isEffectOn, jobject record_bb, jobject play_bb) {
     if (engine == nullptr) {
         LOGE(
             "Engine is null, you must call createEngine before calling this "
             "method");
         return JNI_FALSE;
     }
-
+    void* p_record_bb = env->GetDirectBufferAddress(record_bb);
+    void* p_play_bb = env->GetDirectBufferAddress(play_bb);
+    engine->setByteBufferAddress(p_record_bb, p_play_bb);
     return engine->setEffectOn(isEffectOn) ? JNI_TRUE : JNI_FALSE;
 }
 

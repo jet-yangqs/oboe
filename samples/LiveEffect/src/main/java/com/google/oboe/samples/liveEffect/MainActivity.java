@@ -178,7 +178,7 @@ public class MainActivity extends Activity
             return;
         }
 
-        boolean success = LiveEffectEngine.setEffectOn(true);
+        boolean success = LiveEffectEngine.setEffectOn(true, LiveEffectEngine.byteBufferForRecord, LiveEffectEngine.byteBufferForPlay);
         if (success) {
             setSpinnersEnabled(false);
             statusText.setText(R.string.status_playing);
@@ -193,7 +193,7 @@ public class MainActivity extends Activity
 
     private void stopEffect() {
         Log.d(TAG, "Playing, attempting to stop");
-        LiveEffectEngine.setEffectOn(false);
+        LiveEffectEngine.setEffectOn(false, LiveEffectEngine.byteBufferForRecord, LiveEffectEngine.byteBufferForPlay);
         resetStatusView();
         toggleEffectButton.setText(R.string.start_effect);
         isPlaying = false;

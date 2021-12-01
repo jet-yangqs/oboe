@@ -42,6 +42,7 @@ public:
     bool setAudioApi(oboe::AudioApi);
     bool isAAudioRecommended(void);
     void setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds);
+    void setByteBufferAddress(void *p_record_bb, void *p_play_bb);
 
 private:
     RecordStreamCallBack    mRecordStreamCallBack;
@@ -61,6 +62,8 @@ private:
     int32_t              mBufferSizeInBytes = 0;
     int32_t              mPeroidLenInMilliSeconds  = 20;
     char *               mEngineBuffer = nullptr;
+    char *               mRecordByteBuffer = nullptr;
+    char *               mPlayByteBuffer = nullptr;
     std::mutex           mBufferMutex;
 
     std::shared_ptr<oboe::AudioStream> mRecordingStream;

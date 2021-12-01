@@ -20,27 +20,52 @@ import android.media.AudioManager;
 import android.os.Build;
 import android.util.Log;
 
+import java.nio.ByteBuffer;
+
 public class LiveEffectEngine {
 
-
+    final static String TAG = "LiveEffectEngine.java: ";
     // Load native library
     static {
         System.loadLibrary("liveEffect");
     }
 
+    //direct buffer
+    // 16kHz * 20ms * 16pits_per_sample/8 * 1 channel= 640 inByte
+    public static ByteBuffer byteBufferForRecord = ByteBuffer.allocateDirect(640);
+    public static ByteBuffer byteBufferForPlay = ByteBuffer.allocateDirect(640);
+    public static ByteBuffer javaInternalBuffer = ByteBuffer.allocateDirect(640);
+
+    public final static int copyByteBuffer(final ByteBuffer from, ByteBuffer to) {
+        final int len = Math.min(from.limit(), to.limit());
+        System.arraycopy(from.array(), 0, to.array(), 0, len);
+        return len;
+    }
+
     void javaOnRecord(){
         Log.d("java layer: ","javaOnRecord: void func called from record back thread.");
+        // copy from record buffer to engine buffer
+        //Log.d(TAG, "javaOnRecord->byteBufferForRecord value: " + new String(byteBufferForRecord.array()) );
+        int bytesCopied = copyByteBuffer(byteBufferForRecord, javaInternalBuffer);
+        //Log.d(TAG, "javaOnRecord->javaInternalBuffer value: " + new String(javaInternalBuffer.array()) );
+
+        assert(bytesCopied==640);
     }
 
     static void javaOnPlay(){
         Log.d("java layer: ", "javaOnPlay: static void func called from play back thread.");
+        // copy from engine buffer to play buffer
+        //Log.d(TAG, "javaOnPlay->byteBufferForPlay pre value: " + new String(byteBufferForPlay.array()) );
+        int bytesCopied = copyByteBuffer(javaInternalBuffer, byteBufferForPlay);
+        //Log.d(TAG, "javaOnPlay->byteBufferForPlay after value: " + new String(byteBufferForPlay.array()) );
+        assert(bytesCopied==640);
     }
 
     // Native methods
     static native boolean create();
     static native boolean isAAudioRecommended();
     static native boolean setAPI(int apiType);
-    static native boolean setEffectOn(boolean isEffectOn);
+    static native boolean setEffectOn(boolean isEffectOn, ByteBuffer record_bb, ByteBuffer play_bb);
     static native void setRecordingDeviceId(int deviceId);
     static native void setPlaybackDeviceId(int deviceId);
     static native void delete();
