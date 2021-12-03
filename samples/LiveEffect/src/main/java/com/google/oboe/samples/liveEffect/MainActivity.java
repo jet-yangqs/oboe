@@ -36,6 +36,8 @@ import android.widget.Toast;
 import com.google.oboe.samples.audio_device.AudioDeviceListEntry;
 import com.google.oboe.samples.audio_device.AudioDeviceSpinner;
 
+import java.nio.ByteBuffer;
+
 /**
  * TODO: Update README.md and go through and comment sample
  */
@@ -44,8 +46,9 @@ public class MainActivity extends Activity
 
     private static final String TAG = MainActivity.class.getName();
     private static final int AUDIO_EFFECT_REQUEST = 0;
-    private static final int OBOE_API_AAUDIO = 0;
-    private static final int OBOE_API_OPENSL_ES=1;
+    private static final int OBOE_API_UNSPECIFIED = 0;
+    private static final int OBOE_API_OPENSL_ES = 1;
+    private static final int OBOE_API_AAUDIO= 2;
 
     private TextView statusText;
     private Button toggleEffectButton;
@@ -55,6 +58,8 @@ public class MainActivity extends Activity
 
     private int apiSelection = OBOE_API_AAUDIO;
     private boolean mAAudioRecommended = true;
+
+    private StreamConfiguration mConfig = new StreamConfiguration();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,14 +75,15 @@ public class MainActivity extends Activity
             }
         });
         toggleEffectButton.setText(getString(R.string.start_effect));
-
+        mConfig.reset();
         recordingDeviceSpinner = findViewById(R.id.recording_devices_spinner);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             recordingDeviceSpinner.setDirectionType(AudioManager.GET_DEVICES_INPUTS);
             recordingDeviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                    LiveEffectEngine.setRecordingDeviceId(getRecordingDeviceId());
+                    //OboeJavaAudioEngine.setRecordingDeviceId(getRecordingDeviceId());
+                    mConfig.setRecordDeviceId(getRecordingDeviceId());
                 }
 
                 @Override
@@ -93,7 +99,8 @@ public class MainActivity extends Activity
             playbackDeviceSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
                 public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
-                    LiveEffectEngine.setPlaybackDeviceId(getPlaybackDeviceId());
+                    //OboeJavaAudioEngine.setPlaybackDeviceId(getPlaybackDeviceId());
+                    mConfig.setPlayDeviceId(getPlaybackDeviceId());
                 }
 
                 @Override
@@ -121,7 +128,7 @@ public class MainActivity extends Activity
             }
         });
 
-        LiveEffectEngine.setDefaultStreamValues(this);
+        //OboeJavaAudioEngine.setDefaultStreamValues(this);
     }
 
     private void EnableAudioApiUI(boolean enable) {
@@ -149,15 +156,39 @@ public class MainActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
-        LiveEffectEngine.create();
-        mAAudioRecommended = LiveEffectEngine.isAAudioRecommended();
+        //mConfig = new StreamConfiguration();
+        OboeJavaAudioEngine.createNativeAudioEngine();
+        mAAudioRecommended = OboeJavaAudioEngine.isAAudioRecommended();
+        if(!mAAudioRecommended){
+            mConfig.setNativeApi(StreamConfiguration.NATIVE_API_OPENSLES);
+        }
         EnableAudioApiUI(true);
-        LiveEffectEngine.setAPI(apiSelection);
+        //OboeJavaAudioEngine.setAPI(apiSelection);
+        OboeJavaAudioEngine.setupNativeAudioEngineParameters(
+                20,
+                OboeJavaAudioEngine.byteBufferForRecord,
+                OboeJavaAudioEngine.byteBufferForPlay,
+                mConfig.getNativeApi(),
+                mConfig.getSampleRate(),
+                mConfig.getChannelCount(),
+                mConfig.getFormat(),
+                mConfig.getSharingMode(),
+                mConfig.getPerformanceMode(),
+                mConfig.getInputPreset(),
+                mConfig.getUsage(),
+                mConfig.getRecordDeviceId(),
+                mConfig.getPlayDeviceId(),
+                mConfig.getSessionId(),
+                mConfig.getChannelConversionAllowed(),
+                mConfig.getFormatConversionAllowed(),
+                mConfig.getRateConversionQuality()
+        );
     }
     @Override
     protected void onPause() {
         stopEffect();
-        LiveEffectEngine.delete();
+        //OboeJavaAudioEngine.delete();
+        OboeJavaAudioEngine.releaseNativeAudioEngine();
         super.onPause();
     }
 
@@ -165,7 +196,27 @@ public class MainActivity extends Activity
         if (isPlaying) {
             stopEffect();
         } else {
-            LiveEffectEngine.setAPI(apiSelection);
+            mConfig.setNativeApi(apiSelection);
+            //OboeJavaAudioEngine.setAPI(apiSelection);
+            OboeJavaAudioEngine.setupNativeAudioEngineParameters(
+                    20,
+                    OboeJavaAudioEngine.byteBufferForRecord,
+                    OboeJavaAudioEngine.byteBufferForPlay,
+                    mConfig.getNativeApi(),
+                    mConfig.getSampleRate(),
+                    mConfig.getChannelCount(),
+                    mConfig.getFormat(),
+                    mConfig.getSharingMode(),
+                    mConfig.getPerformanceMode(),
+                    mConfig.getInputPreset(),
+                    mConfig.getUsage(),
+                    mConfig.getRecordDeviceId(),
+                    mConfig.getPlayDeviceId(),
+                    mConfig.getSessionId(),
+                    mConfig.getChannelConversionAllowed(),
+                    mConfig.getFormatConversionAllowed(),
+                    mConfig.getRateConversionQuality()
+            );
             startEffect();
         }
     }
@@ -178,8 +229,9 @@ public class MainActivity extends Activity
             return;
         }
 
-        boolean success = LiveEffectEngine.setEffectOn(true, LiveEffectEngine.byteBufferForRecord, LiveEffectEngine.byteBufferForPlay);
-        if (success) {
+        //boolean success = OboeJavaAudioEngine.setEffectOn(true, OboeJavaAudioEngine.byteBufferForRecord, OboeJavaAudioEngine.byteBufferForPlay);
+        int hr = OboeJavaAudioEngine.startNativeAudio();
+        if (hr == 0) {
             setSpinnersEnabled(false);
             statusText.setText(R.string.status_playing);
             toggleEffectButton.setText(R.string.stop_effect);
@@ -193,7 +245,8 @@ public class MainActivity extends Activity
 
     private void stopEffect() {
         Log.d(TAG, "Playing, attempting to stop");
-        LiveEffectEngine.setEffectOn(false, LiveEffectEngine.byteBufferForRecord, LiveEffectEngine.byteBufferForPlay);
+        //OboeJavaAudioEngine.setEffectOn(false, OboeJavaAudioEngine.byteBufferForRecord, OboeJavaAudioEngine.byteBufferForPlay);
+        int hr = OboeJavaAudioEngine.stopNativeAudio();
         resetStatusView();
         toggleEffectButton.setText(R.string.start_effect);
         isPlaying = false;

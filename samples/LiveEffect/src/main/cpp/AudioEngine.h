@@ -26,6 +26,30 @@
 #include "JniCallBack.h"
 #include <mutex>
 
+
+// These must match order in strings.xml and in StreamConfiguration.java
+#define NATIVE_MODE_UNSPECIFIED  0
+#define NATIVE_MODE_OPENSLES     1
+#define NATIVE_MODE_AAUDIO       2
+
+#define MAX_SINE_OSCILLATORS     8
+#define AMPLITUDE_SINE           1.0
+#define AMPLITUDE_SAWTOOTH       0.5
+#define FREQUENCY_SAW_PING       800.0
+#define AMPLITUDE_SAW_PING       0.8
+#define AMPLITUDE_IMPULSE        0.7
+
+#define NANOS_PER_MICROSECOND    ((int64_t) 1000)
+#define NANOS_PER_MILLISECOND    (1000 * NANOS_PER_MICROSECOND)
+#define NANOS_PER_SECOND         (1000 * NANOS_PER_MILLISECOND)
+
+#define SECONDS_TO_RECORD        10
+
+enum class nativeParamsResult : int32_t {
+    OK = 0,
+    ErrorBase = -1,
+};
+
 class AudioEngine {
 public:
     AudioEngine();
@@ -41,19 +65,48 @@ public:
     bool setEffectOn(bool isOn);
     bool setAudioApi(oboe::AudioApi);
     bool isAAudioRecommended(void);
-    void setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds);
-    void setByteBufferAddress(void *p_record_bb, void *p_play_bb);
+    int setupEngineConfigParameters(int peroidLenInMilliSeconds,
+                                   void* p_record_bb,
+                                   void* p_play_bb,
+                                   int nativeApi,
+                                   int sampleRate,
+                                   int channelCount,
+                                   int format,
+                                   int sharingMode,
+                                   int performanceMode,
+                                   int inputPreset,
+                                   int usage,
+                                   int recordDeviceId,
+                                   int playDeviceId,
+                                   int sessionId,
+                                   bool channelConversionAllowed,
+                                   bool formatConversionAllowed,
+                                   int rateConversionQuality
+                                );
+    int startAudio();
+    int stopAudio();
+    //void setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds);
+    //void setByteBufferAddress(void *p_record_bb, void *p_play_bb);
 
 private:
     RecordStreamCallBack    mRecordStreamCallBack;
     PlayStreamCallBack      mPlayStreamCallBack;
     JniCallBack             mJniCallBack;
     bool              mIsEffectOn = false;
+    bool              mAudioEngineOn = false;
     // builder parameters
-    int32_t           mRecordingDeviceId = oboe::kUnspecified;
+    int32_t           mRecordingDeviceId = oboe::kUnspecified; //0
     int32_t           mPlaybackDeviceId = oboe::kUnspecified;
     const oboe::AudioFormat mFormat = oboe::AudioFormat::I16;
+    const oboe::SharingMode mSharingMode = oboe::SharingMode::Shared;
+    const oboe::PerformanceMode mPerformanceMode = oboe::PerformanceMode::LowLatency;
+    const oboe::InputPreset mInputPreset = oboe::InputPreset::VoiceCommunication;
+    const oboe::Usage mUsage = oboe::Usage::VoiceCommunication;
     oboe::AudioApi    mAudioApi = oboe::AudioApi::AAudio;
+    oboe::SessionId mSessionId = oboe::SessionId::None; //-1
+    const bool mChannelConversionAllowed = true;
+    const bool mFormatConversionAllowed = true;
+    oboe::SampleRateConversionQuality mSampleRateConversionQuality = oboe::SampleRateConversionQuality::Medium;
     int32_t           mSampleRate = 16000;
     const int32_t     mInputChannelCount = oboe::ChannelCount::Mono;
     const int32_t     mOutputChannelCount = oboe::ChannelCount::Mono;

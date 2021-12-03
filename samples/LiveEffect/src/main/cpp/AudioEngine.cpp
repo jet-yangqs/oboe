@@ -21,6 +21,18 @@
 
 extern JavaVM *gs_jvm;
 
+static oboe::AudioApi convertNativeApiToAudioApi(int nativeApi) {
+    switch (nativeApi) {
+        default:
+        case NATIVE_MODE_UNSPECIFIED:
+            return oboe::AudioApi::Unspecified;
+        case NATIVE_MODE_AAUDIO:
+            return oboe::AudioApi::AAudio;
+        case NATIVE_MODE_OPENSLES:
+            return oboe::AudioApi::OpenSLES;
+    }
+}
+
 AudioEngine::AudioEngine() {
     assert(mOutputChannelCount == mInputChannelCount);
 }
@@ -41,6 +53,39 @@ bool AudioEngine::setAudioApi(oboe::AudioApi api) {
     if (mIsEffectOn) return false;
     mAudioApi = api;
     return true;
+}
+
+int AudioEngine::startAudio() {
+    oboe::Result hr = openStreams();
+    if( hr != oboe::Result::OK){
+        return (jint)hr;
+    }
+    hr = mRecordStreamCallBack.start();
+    if( hr != oboe::Result::OK){
+        return (jint)hr;
+    }
+    hr = mPlayStreamCallBack.start();
+    if( hr != oboe::Result::OK){
+        return (jint)hr;
+    }
+    mAudioEngineOn = true;
+    return (jint)oboe::Result::OK;
+}
+
+int AudioEngine::stopAudio() {
+    if(mAudioEngineOn) {
+        oboe::Result hr = mRecordStreamCallBack.stop();
+        if (hr != oboe::Result::OK) {
+            return (jint) hr;
+        }
+        hr = mPlayStreamCallBack.stop();
+        if (hr != oboe::Result::OK) {
+            return (jint) hr;
+        }
+        closeStreams();
+        mAudioEngineOn = false;
+    }
+    return (jint)oboe::Result::OK;
 }
 
 bool AudioEngine::setEffectOn(bool isOn) {
@@ -79,6 +124,8 @@ void AudioEngine::closeStreams() {
     mRecordStreamCallBack.setInputStream(nullptr);
     mRecordStreamCallBack.setAudioEngine(nullptr);
     mBufferSizeInBytes = 0;
+    mRecordByteBuffer = nullptr;
+    mPlayByteBuffer = nullptr;
     if(mEngineBuffer){
         delete mEngineBuffer;
     }
@@ -133,16 +180,16 @@ int AudioEngine::onRecord(oboe::AudioStream *inputStream, void *audioData, int n
     return numFrames;
 }
 
-void AudioEngine::setByteBufferAddress(void *p_record_bb, void *p_play_bb){
-    mRecordByteBuffer = (char*)p_record_bb;
-    mPlayByteBuffer = (char*)p_play_bb;
-}
+//void AudioEngine::setByteBufferAddress(void *p_record_bb, void *p_play_bb){
+//    mRecordByteBuffer = (char*)p_record_bb;
+//    mPlayByteBuffer = (char*)p_play_bb;
+//}
 
 oboe::Result  AudioEngine::openStreams() {
 
-    int32_t sampleRate = 16000;
-    int32_t peroidLenInMilliSeconds = 20;
-    setupConfigParameters(sampleRate, peroidLenInMilliSeconds);
+    //int32_t sampleRate = 16000;
+    //int32_t peroidLenInMilliSeconds = 20;
+    //setupConfigParameters(sampleRate, peroidLenInMilliSeconds);
 
     // int32_t bufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
 
@@ -158,7 +205,7 @@ oboe::Result  AudioEngine::openStreams() {
                                     * mRecordingStream->getChannelCount() * 2;
         // buffer size need less than buffer capacity
         assert(mBufferSizeInBytes <= recordBufferCapacityInBytes);
-        mPeroidLenInMilliSeconds = peroidLenInMilliSeconds;
+        //mPeroidLenInMilliSeconds = peroidLenInMilliSeconds;
         mEngineBuffer = new char[mBufferSizeInBytes];
     }
 
@@ -196,10 +243,60 @@ oboe::Result  AudioEngine::openStreams() {
     return result;
 }
 
-void AudioEngine::setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds){
-    mSampleRate = sampleRate;
+//void AudioEngine::setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds){
+//    mSampleRate = sampleRate;
+//    mPeroidLenInMilliSeconds = peroidLenInMilliSeconds;
+//    mBufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
+//}
+
+int AudioEngine::setupEngineConfigParameters(int peroidLenInMilliSeconds, void* p_record_bb, void* p_play_bb,
+                               int nativeApi, int sampleRate, int channelCount, int format, int sharingMode,
+                               int performanceMode, int inputPreset, int usage, int recordDeviceId, int playDeviceId,
+                               int sessionId, bool channelConversionAllowed, bool formatConversionAllowed,
+                               int rateConversionQuality){
+
+    oboe::AudioApi audioApi = oboe::AudioApi::Unspecified;
+    switch (nativeApi) {
+        case NATIVE_MODE_UNSPECIFIED:
+        case NATIVE_MODE_AAUDIO:
+        case NATIVE_MODE_OPENSLES:
+            audioApi = convertNativeApiToAudioApi(nativeApi);
+            break;
+        default:
+            return (jint) oboe::Result::ErrorOutOfRange;
+    }
+
+    if (channelCount < 0 || channelCount > 256) {
+        LOGE("ActivityContext::open() channels out of range");
+        return (jint) oboe::Result::ErrorOutOfRange;
+    }
     mPeroidLenInMilliSeconds = peroidLenInMilliSeconds;
-    mBufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
+    mRecordByteBuffer = static_cast<char *>(p_record_bb);
+    mPlayByteBuffer = static_cast<char *> (p_play_bb);
+    mAudioApi = audioApi;
+    //assert(mAudioApi == oboe::AudioApi::AAudio);
+    mSampleRate = sampleRate;
+    assert(mSampleRate == 16000);
+    if(mFormat == (oboe::AudioFormat)format){
+        mBufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
+    }
+    else{
+        assert(mFormat == (oboe::AudioFormat)format);
+    }
+    assert(mInputChannelCount == channelCount);
+    assert(mOutputChannelCount == channelCount);
+    assert(mSharingMode == (oboe::SharingMode)sharingMode);
+    assert(mPerformanceMode == (oboe::PerformanceMode) performanceMode);
+    assert(mInputPreset == (oboe::InputPreset)inputPreset);
+    assert(mUsage == (oboe::Usage)usage);
+    mRecordingDeviceId = recordDeviceId;
+    mPlaybackDeviceId = playDeviceId;
+    assert(mSessionId == (oboe::SessionId)sessionId);
+    assert(mChannelConversionAllowed == channelConversionAllowed);
+    assert(mFormatConversionAllowed == formatConversionAllowed);
+    mSampleRateConversionQuality = (oboe::SampleRateConversionQuality)rateConversionQuality;
+
+    return (jint)nativeParamsResult::OK;
 }
 
 /**
@@ -222,8 +319,11 @@ oboe::AudioStreamBuilder *AudioEngine::setupRecordingStreamParameters(
             ->setDeviceId(mRecordingDeviceId)
             ->setDirection(oboe::Direction::Input)
             ->setSampleRate(mSampleRate)
+            ->setInputPreset(mInputPreset)
             ->setChannelCount(mInputChannelCount)
-            ->setFramesPerDataCallback(framesPerCallback);
+            ->setFramesPerDataCallback(framesPerCallback)
+            ->setBufferCapacityInFrames(framesPerCallback*2);
+    // ->setInputPreset(oboe::InputPreset::VoicePerformance) // effect for live recording and playing
     return setupCommonStreamParameters(builder);
 }
 
@@ -235,7 +335,7 @@ oboe::AudioStreamBuilder *AudioEngine::setupRecordingStreamParameters(
  */
 oboe::AudioStreamBuilder *AudioEngine::setupPlaybackStreamParameters(
     oboe::AudioStreamBuilder *builder) {
-    assert(mSampleRate == 16000);
+
     int32_t framesPerCallback = mSampleRate * mPeroidLenInMilliSeconds/1000;
     assert(framesPerCallback == 320);
     builder->setDataCallback(&mPlayStreamCallBack)
@@ -243,7 +343,8 @@ oboe::AudioStreamBuilder *AudioEngine::setupPlaybackStreamParameters(
             ->setDirection(oboe::Direction::Output)
             ->setSampleRate(mSampleRate)
             ->setChannelCount(mOutputChannelCount)
-            ->setFramesPerDataCallback(framesPerCallback);
+            ->setFramesPerDataCallback(framesPerCallback)
+            ->setBufferCapacityInFrames(framesPerCallback*2);
 
     return setupCommonStreamParameters(builder);
 }
@@ -259,10 +360,10 @@ oboe::AudioStreamBuilder *AudioEngine::setupCommonStreamParameters(
     oboe::AudioStreamBuilder *builder) {
     builder->setAudioApi(mAudioApi)
             ->setFormat(mFormat)
-            ->setFormatConversionAllowed(true)
-            ->setChannelConversionAllowed(true)
-            ->setSharingMode(oboe::SharingMode::Shared)
-            ->setPerformanceMode(oboe::PerformanceMode::LowLatency);
+            ->setFormatConversionAllowed(mFormatConversionAllowed)
+            ->setChannelConversionAllowed(mChannelConversionAllowed)
+            ->setSharingMode(mSharingMode)
+            ->setPerformanceMode(mPerformanceMode);
 
     return builder;
 }

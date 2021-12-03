@@ -16,7 +16,9 @@ class AudioEngine;
 class RecordStreamCallBack : public oboe::AudioStreamCallback {
 public:
     RecordStreamCallBack() {}
-    virtual ~RecordStreamCallBack() {}
+    virtual ~RecordStreamCallBack() {
+        mAudioEngine = nullptr;
+    }
 
     void setInputStream(std::shared_ptr<oboe::AudioStream> stream) {
         mInputStream = stream;
