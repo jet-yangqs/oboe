@@ -26,6 +26,9 @@ void RecordStreamCallBack::onErrorBeforeClose(oboe::AudioStream *oboeStream,
  */
 void RecordStreamCallBack::onErrorAfterClose(oboe::AudioStream *oboeStream,
                                            oboe::Result error) {
+    assert(mAudioEngine);
+    //因为插入耳机record和play stream都关闭了，但是回调只在此处触发，play中没有触发，因此两个stream都要关闭重启
+    mAudioEngine->handleDeviceChange();
     LOGE("%s stream Error after close: %s",
          oboe::convertToText(oboeStream->getDirection()),
          oboe::convertToText(error));

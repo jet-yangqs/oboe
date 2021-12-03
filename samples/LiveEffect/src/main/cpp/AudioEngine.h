@@ -53,7 +53,7 @@ enum class nativeParamsResult : int32_t {
 class AudioEngine {
 public:
     AudioEngine();
-
+    ~AudioEngine();
     void setRecordingDeviceId(int32_t deviceId);
     void setPlaybackDeviceId(int32_t deviceId);
     int onPlay(oboe::AudioStream *outputStream, void *audioData, int numFrames);
@@ -85,6 +85,13 @@ public:
                                 );
     int startAudio();
     int stopAudio();
+    int startRecord();
+    int stopRecord();
+    int startPlay();
+    int stopPlay();
+    int handleRecordDeviceChange();
+    int handlePlayDeviceChange();
+    int handleDeviceChange();
     //void setupConfigParameters(int32_t sampleRate, int32_t peroidLenInMilliSeconds);
     //void setByteBufferAddress(void *p_record_bb, void *p_play_bb);
 
@@ -119,10 +126,14 @@ private:
     char *               mPlayByteBuffer = nullptr;
     std::mutex           mBufferMutex;
 
-    std::shared_ptr<oboe::AudioStream> mRecordingStream;
+    std::shared_ptr<oboe::AudioStream> mRecordStream;
     std::shared_ptr<oboe::AudioStream> mPlayStream;
 
     oboe::Result openStreams();
+
+    oboe::Result openRecordStream();
+
+    oboe::Result openPlayStream();
 
     void closeStreams();
 

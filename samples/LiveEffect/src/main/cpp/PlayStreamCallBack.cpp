@@ -26,6 +26,8 @@ void PlayStreamCallBack::onErrorBeforeClose(oboe::AudioStream *oboeStream,
  */
 void PlayStreamCallBack::onErrorAfterClose(oboe::AudioStream *oboeStream,
                                     oboe::Result error) {
+    assert(mAudioEngine);
+    mAudioEngine->handlePlayDeviceChange();
     LOGE("%s stream Error after close: %s",
          oboe::convertToText(oboeStream->getDirection()),
          oboe::convertToText(error));

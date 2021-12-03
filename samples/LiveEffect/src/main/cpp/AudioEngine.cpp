@@ -37,6 +37,16 @@ AudioEngine::AudioEngine() {
     assert(mOutputChannelCount == mInputChannelCount);
 }
 
+AudioEngine::~AudioEngine() {
+    if(mEngineBuffer) {
+        delete mEngineBuffer;
+        mEngineBuffer = nullptr;
+    }
+    mRecordByteBuffer = nullptr;
+    mPlayByteBuffer = nullptr;
+}
+
+
 void AudioEngine::setRecordingDeviceId(int32_t deviceId) {
     mRecordingDeviceId = deviceId;
 }
@@ -73,19 +83,80 @@ int AudioEngine::startAudio() {
 }
 
 int AudioEngine::stopAudio() {
+    //oboe::Result hr = oboe::Result::OK;
     if(mAudioEngineOn) {
-        oboe::Result hr = mRecordStreamCallBack.stop();
-        if (hr != oboe::Result::OK) {
-            return (jint) hr;
-        }
-        hr = mPlayStreamCallBack.stop();
-        if (hr != oboe::Result::OK) {
-            return (jint) hr;
-        }
+        mRecordStreamCallBack.stop();
+        mPlayStreamCallBack.stop();
         closeStreams();
         mAudioEngineOn = false;
     }
-    return (jint)oboe::Result::OK;
+    return 0;
+}
+
+int AudioEngine::startRecord() {
+    oboe::Result hr = openRecordStream();
+    if( hr != oboe::Result::OK){
+        return (int)hr;
+    }
+    hr = mRecordStreamCallBack.start();
+    if( hr != oboe::Result::OK){
+        return (int)hr;
+    }
+    //mAudioEngineOn = true;
+    return (int)hr;
+}
+
+int AudioEngine::startPlay() {
+    oboe::Result hr = openPlayStream();
+    if( hr != oboe::Result::OK){
+        return (int)hr;
+    }
+    hr = mPlayStreamCallBack.start();
+    if( hr != oboe::Result::OK){
+        return (int)hr;
+    }
+    //mAudioEngineOn = true;
+    return (int)hr;
+}
+
+int AudioEngine::stopRecord() {
+    mRecordStreamCallBack.stop();
+    closeStream(mRecordStream);
+    mRecordStreamCallBack.setInputStream(nullptr);
+    mRecordStreamCallBack.setAudioEngine(nullptr);
+    return 0;
+}
+
+int AudioEngine::stopPlay() {
+    mPlayStreamCallBack.stop();
+    closeStream(mPlayStream);
+    mPlayStreamCallBack.setOutputStream(nullptr);
+    mPlayStreamCallBack.setAudioEngine(nullptr);
+    return 0;
+}
+
+int AudioEngine::handleDeviceChange() {
+    int hr = handleRecordDeviceChange();
+    hr = handlePlayDeviceChange();
+    return hr;
+}
+
+int AudioEngine::handleRecordDeviceChange() {
+    stopRecord();
+    int hr = startRecord();
+    if(hr != 0){
+        //todo: need notify UI ?
+    }
+    return hr;
+}
+
+int AudioEngine::handlePlayDeviceChange() {
+    stopPlay();
+    int hr = startPlay();
+    if(hr != 0){
+        //todo: need notify UI ?
+    }
+    return hr;
 }
 
 bool AudioEngine::setEffectOn(bool isOn) {
@@ -120,15 +191,10 @@ void AudioEngine::closeStreams() {
     closeStream(mPlayStream);
     mPlayStreamCallBack.setOutputStream(nullptr);
     mPlayStreamCallBack.setAudioEngine(nullptr);
-    closeStream(mRecordingStream);
+    closeStream(mRecordStream);
     mRecordStreamCallBack.setInputStream(nullptr);
     mRecordStreamCallBack.setAudioEngine(nullptr);
     mBufferSizeInBytes = 0;
-    mRecordByteBuffer = nullptr;
-    mPlayByteBuffer = nullptr;
-    if(mEngineBuffer){
-        delete mEngineBuffer;
-    }
 }
 
 int AudioEngine::onPlay(oboe::AudioStream *outputStream, void *audioData, int numFrames){
@@ -185,61 +251,60 @@ int AudioEngine::onRecord(oboe::AudioStream *inputStream, void *audioData, int n
 //    mPlayByteBuffer = (char*)p_play_bb;
 //}
 
-oboe::Result  AudioEngine::openStreams() {
-
-    //int32_t sampleRate = 16000;
-    //int32_t peroidLenInMilliSeconds = 20;
-    //setupConfigParameters(sampleRate, peroidLenInMilliSeconds);
-
-    // int32_t bufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
-
+oboe::Result  AudioEngine::openRecordStream() {
     // config record stream
-    oboe::AudioStreamBuilder inBuilder, outBuilder;
+    oboe::AudioStreamBuilder inBuilder;
     setupRecordingStreamParameters(&inBuilder);
-    oboe::Result result = inBuilder.openStream(mRecordingStream);
+    oboe::Result result = inBuilder.openStream(mRecordStream);
     if (result != oboe::Result::OK) {
         LOGE("Failed to open input stream. Error %s", oboe::convertToText(result));
         return result;
-    } else {
-        int32_t recordBufferCapacityInBytes = mRecordingStream->getBufferCapacityInFrames()
-                                    * mRecordingStream->getChannelCount() * 2;
-        // buffer size need less than buffer capacity
-        assert(mBufferSizeInBytes <= recordBufferCapacityInBytes);
-        //mPeroidLenInMilliSeconds = peroidLenInMilliSeconds;
-        mEngineBuffer = new char[mBufferSizeInBytes];
     }
+    int32_t recordBufferCapacityInBytes = mRecordStream->getBufferCapacityInFrames()
+                                              * mRecordStream->getChannelCount() * 2;
+    // buffer size need less than buffer capacity
+    assert(mBufferSizeInBytes <= recordBufferCapacityInBytes);
 
-    // int32_t recordBufferSize = mRecordingStream->getBufferSizeInFrames();
-    // assert(recordBufferSize>0);
-    warnIfNotLowLatency(mRecordingStream);
+    warnIfNotLowLatency(mRecordStream);
+    mRecordStreamCallBack.setInputStream(mRecordStream);
+    mRecordStreamCallBack.setAudioEngine(this);
+    return result;
+}
 
+oboe::Result AudioEngine::openPlayStream() {
+    oboe::AudioStreamBuilder outBuilder;
     // config play stream
     setupPlaybackStreamParameters(&outBuilder);
-    result = outBuilder.openStream(mPlayStream);
+    oboe::Result result = outBuilder.openStream(mPlayStream);
     if (result != oboe::Result::OK) {
         LOGE("Failed to open output stream. Error %s", oboe::convertToText(result));
-        closeStream(mRecordingStream);
         return result;
     }
     int32_t playBufferCapacityInBytes = mPlayStream->getBufferCapacityInFrames()
-                                * mPlayStream->getChannelCount() * 2;
-
+                                        * mPlayStream->getChannelCount() * 2;
     assert(mBufferSizeInBytes <= playBufferCapacityInBytes);
     warnIfNotLowLatency(mPlayStream);
 
-    mRecordStreamCallBack.setInputStream(mRecordingStream);
-    mRecordStreamCallBack.setAudioEngine(this);
     mPlayStreamCallBack.setOutputStream(mPlayStream);
     mPlayStreamCallBack.setAudioEngine(this);
+    return result;
+}
 
-    assert(mSampleRate == 16000);
-    int32_t playSampleRate = mPlayStream->getSampleRate();
-    assert(playSampleRate == mSampleRate);
-    /*
-     * mPlayStream->setBufferSizeInFrames(bufferSize);
-     * int32_t playBufferSize = mPlayStream->getBufferSizeInFrames();
-     * assert(playBufferSize>0);
-    */
+oboe::Result  AudioEngine::openStreams() {
+
+    oboe::Result result = openRecordStream();
+    if (result != oboe::Result::OK) {
+        LOGE("Failed to open input stream. Error %s", oboe::convertToText(result));
+        return result;
+    }
+
+    result = openPlayStream();
+    if (result != oboe::Result::OK) {
+        LOGE("Failed to open output stream. Error %s", oboe::convertToText(result));
+        closeStream(mRecordStream);
+        return result;
+    }
+
     return result;
 }
 
@@ -279,6 +344,9 @@ int AudioEngine::setupEngineConfigParameters(int peroidLenInMilliSeconds, void* 
     assert(mSampleRate == 16000);
     if(mFormat == (oboe::AudioFormat)format){
         mBufferSizeInBytes = sampleRate * peroidLenInMilliSeconds / 1000 * 2;
+        if(!mEngineBuffer) {
+            mEngineBuffer = new char[mBufferSizeInBytes];
+        }
     }
     else{
         assert(mFormat == (oboe::AudioFormat)format);
